@@ -216,8 +216,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("input", help="Input image path")
     p.add_argument(
-        "-o", "--output", default="output.png",
-        help="Output path (default: output.png)",
+        "-o", "--output", default=None,
+        help="Output path (default: output.<input-ext>)",
     )
     p.add_argument(
         "-w", "--width", type=int, default=None,
@@ -260,7 +260,11 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _load_image(path: Path) -> Image.Image:
+def _resolve_output_path(input_path: Path, output: str | None) -> str:
+    """Deduce output path, preserving the input file extension."""
+    if output:
+        return output
+    return str(input_path.with_name(f"output{input_path.suffix}"))
     """Open *path* and ensure RGB mode."""
     return Image.open(path).convert("RGB")
 
@@ -303,7 +307,7 @@ def main() -> None:
         print(f"Error: {input_path} not found", file=sys.stderr)
         sys.exit(1)
 
-    img = _load_image(input_path)
+    img = Image.open(input_path).convert("RGB")
     print(f"Loaded: {input_path} ({img.width}x{img.height})")
 
     img, (out_w, out_h), bg_color, dot_color, colored, rel_pos = _prepare_mode(
@@ -323,8 +327,9 @@ def main() -> None:
         rel_pos=rel_pos,
     )
 
-    result.save(args.output)
-    print(f"Saved: {args.output} ({out_w}x{out_h})")
+    out_path = _resolve_output_path(input_path, args.output)
+    result.save(out_path)
+    print(f"Saved: {out_path} ({out_w}x{out_h})")
 
 
 if __name__ == "__main__":

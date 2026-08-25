@@ -2,6 +2,9 @@
 
 Convert any image into a dot-style wallpaper.
 
+![example](example.jpg)
+![output](output.jpg)
+
 ## Install
 
 ```bash
@@ -17,49 +20,43 @@ python pixa.py input.jpg
 ## Usage
 
 ```bash
-# Basic usage (output = input resolution, black background)
-pixa image.jpg -o wallpaper.png
+# White dots on black (default), auto 1920x1080
+pixa image.jpg
+
+# Colored dots, background removed
+pixa image.jpg --mode color
+
+# Full image as dots, original background preserved
+pixa image.jpg --mode full
 
 # Custom resolution
-pixa image.jpg -o wallpaper.png -w 1920 -ht 1080
+pixa image.jpg -w 2560 -ht 1440
 
-# Color mode (keep original colors)
-pixa image.jpg -o wallpaper.png --color
-
-# Auto-remove background
-pixa image.jpg -o wallpaper.png --no-background
-
-# Custom colors
-pixa image.jpg -o wallpaper.png --bg "#131313" --text-color "#f5c2e7"
+# Custom output path
+pixa image.jpg -o my_wallpaper.jpg
 ```
+
+## Modes
+
+| Mode | Description |
+|------|-------------|
+| `white` | Character only, white dots, black background |
+| `color` | Character only, colored dots, black background |
+| `full` | Whole image as dots, original background preserved |
 
 ## Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-o, --output` | `output.png` | Output file |
-| `-w, --width` | input width | Output width in px |
-| `-ht, --height` | input height | Output height in px |
+| `-o, --output` | `output.<ext>` | Output path (preserves input format) |
+| `-w, --width` | auto | Output width in px |
+| `-ht, --height` | auto | Output height in px |
 | `-d, --dot-size` | `7` | Spacing between dots |
 | `-r, --radius` | `3.2` | Max dot radius |
 | `-th, --threshold` | `25` | Min brightness to render |
-| `--bg` | `#000000` | Background color |
+| `--mode` | `white` | `full` / `color` / `white` |
+| `--bg` | auto | Background hex color |
 | `--text-color` | `#ffffff` | Dot color (white mode) |
-| `--color` | off | Use original image colors |
-| `--no-background` | off | Auto-detect and remove background |
-
-## Examples
-
-```bash
-# White dots on black, 1920x1080
-pixa photo.jpg -o wall.png -w 1920 -ht 1080
-
-# Colored dots with background removal
-pixa anime.jpg -o wall.png --color --no-background
-
-# Pink dots on dark background
-pixa photo.jpg -o wall.png --text-color "#f5c2e7" --bg "#131313"
-```
 
 ## License
 
