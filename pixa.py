@@ -165,6 +165,15 @@ def main():
         bg_mask = remove_background(arr)
         bbox = find_character_bbox(bg_mask)
         img = img.crop(bbox)
+
+        # Set background pixels to black within the crop
+        crop_arr = np.array(img)
+        crop_offset_y = bbox[1]
+        crop_offset_x = bbox[0]
+        local_mask = bg_mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+        crop_arr[local_mask] = [0, 0, 0]
+        img = Image.fromarray(crop_arr)
+
         print(f"Cropped to character: {img.width}x{img.height}")
 
     result = create_dots_wallpaper(
