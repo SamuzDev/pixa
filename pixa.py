@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
+from collections import Counter
 
 
 def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
@@ -14,35 +15,31 @@ def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
 
 
+def detect_bg_color(arr: np.ndarray) -> tuple[int, int, int]:
+    """Find the most common edge color (background)."""
+    edges = np.concatenate([
+        arr[0, :],
+        arr[-1, :],
+        arr[:, 0],
+        arr[:, -1],
+    ])
+    edge_tuples = [tuple(p) for p in edges]
+    return Counter(edge_tuples).most_common(1)[0][0]
+
+
 def remove_background(arr: np.ndarray, threshold: int = 30) -> np.ndarray:
     """Detect and remove solid-color backgrounds by finding the most common edge color."""
-    h, w = arr.shape[:2]
-
-    # Sample edges to find background color
-    edges = np.concatenate([
-        arr[0, :],      # top
-        arr[-1, :],     # bottom
-        arr[:, 0],      # left
-        arr[:, -1],     # right
-    ])
-
-    # Find most common color in edges
-    from collections import Counter
-    edge_tuples = [tuple(p) for p in edges]
-    most_common = Counter(edge_tuples).most_common(1)[0][0]
+    most_common = detect_bg_color(arr)
 
     r, g, b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
 
-    # Calculate color distance from background
     dist = np.sqrt(
         (r.astype(float) - most_common[0])**2 +
         (g.astype(float) - most_common[1])**2 +
         (b.astype(float) - most_common[2])**2
     )
 
-    # Background pixels are close to the detected color
     bg_mask = dist < threshold * 3
-
     return bg_mask
 
 
@@ -139,10 +136,14 @@ def main():
     parser.add_argument("-d", "--dot-size", type=int, default=7, help="Dot spacing in px (default: 7)")
     parser.add_argument("-r", "--radius", type=float, default=3.2, help="Max dot radius (default: 3.2)")
     parser.add_argument("-th", "--threshold", type=int, default=25, help="Min brightness threshold (default: 25)")
-    parser.add_argument("--bg", default="#000000", help="Background color hex (default: #000000)")
+    parser.add_argument("--bg", default=None, help="Background color hex (default: auto)")
     parser.add_argument("--text-color", default="#ffffff", help="Dot color for white mode (default: #ffffff)")
-    parser.add_argument("--color", action="store_true", help="Use original image colors")
-    parser.add_argument("--no-background", action="store_true", help="Auto-detect and remove background")
+    parser.add_argument(
+        "--mode",
+        choices=["full", "color", "white"],
+        default="white",
+        help="full=image+original bg, color=character+colored dots, white=character+white dots (default: white)",
+    )
 
     args = parser.parse_args()
 
@@ -156,25 +157,42 @@ def main():
 
     out_w = args.width or img.width
     out_h = args.height or img.height
-
-    bg_color = hex_to_rgb(args.bg)
     dot_color = hex_to_rgb(args.text_color)
 
-    if args.no_background:
+    if args.mode == "full":
+        arr = np.array(img)
+        bg_rgb = detect_bg_color(arr)
+        bg_color = hex_to_rgb(args.bg) if args.bg else bg_rgb
+        colored = True
+        print(f"Mode: full (bg auto-detected: {bg_rgb})")
+    elif args.mode == "color":
         arr = np.array(img)
         bg_mask = remove_background(arr)
         bbox = find_character_bbox(bg_mask)
         img = img.crop(bbox)
 
-        # Set background pixels to black within the crop
         crop_arr = np.array(img)
-        crop_offset_y = bbox[1]
-        crop_offset_x = bbox[0]
         local_mask = bg_mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
         crop_arr[local_mask] = [0, 0, 0]
         img = Image.fromarray(crop_arr)
 
-        print(f"Cropped to character: {img.width}x{img.height}")
+        bg_color = hex_to_rgb(args.bg) if args.bg else (0, 0, 0)
+        colored = True
+        print(f"Mode: color (cropped: {img.width}x{img.height})")
+    else:  # white
+        arr = np.array(img)
+        bg_mask = remove_background(arr)
+        bbox = find_character_bbox(bg_mask)
+        img = img.crop(bbox)
+
+        crop_arr = np.array(img)
+        local_mask = bg_mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+        crop_arr[local_mask] = [0, 0, 0]
+        img = Image.fromarray(crop_arr)
+
+        bg_color = hex_to_rgb(args.bg) if args.bg else (0, 0, 0)
+        colored = False
+        print(f"Mode: white (cropped: {img.width}x{img.height})")
 
     result = create_dots_wallpaper(
         source=img,
@@ -185,7 +203,7 @@ def main():
         threshold=args.threshold,
         bg_color=bg_color,
         dot_color=dot_color,
-        colored=args.color,
+        colored=colored,
     )
 
     result.save(args.output)
