@@ -78,11 +78,15 @@ def find_character_bbox(
     )
 
 
-def crop_to_character(img: Image.Image) -> tuple[Image.Image, tuple[float, float]]:
+def crop_to_character(
+    img: Image.Image,
+) -> tuple[Image.Image, tuple[float, float], float]:
     """Remove background and crop to the character bounding box.
 
-    Returns ``(cropped_image, (rel_x, rel_y))`` where the relative position
-    is where the character's centre sits in the *original* image (0-1 range).
+    Returns ``(cropped_image, (rel_x, rel_y), scale)`` where:
+    - *rel_x, rel_y*: centre of the character in the original image (0-1).
+    - *scale*: fraction of the original canvas the character occupied
+      (0-1, based on height).
     """
     orig_w, orig_h = img.size
     arr = np.array(img)
@@ -96,8 +100,33 @@ def crop_to_character(img: Image.Image) -> tuple[Image.Image, tuple[float, float
 
     rel_x = (bbox[0] + bbox[2]) / 2 / orig_w
     rel_y = (bbox[1] + bbox[3]) / 2 / orig_h
+    scale = (bbox[3] - bbox[1]) / orig_h
 
-    return Image.fromarray(crop_arr), (rel_x, rel_y)
+    return Image.fromarray(crop_arr), (rel_x, rel_y), scale
+
+
+def _compose_character(
+    character: Image.Image,
+    out_w: int,
+    out_h: int,
+    rel_pos: tuple[float, float],
+    scale: float,
+) -> Image.Image:
+    """Place *character* on an ``out_w x out_h`` canvas preserving original proportions.
+
+    The character is scaled to *scale* fraction of the output height and
+    positioned at *rel_pos* (centre of the character in 0-1 coords).
+    """
+    char_h = int(out_h * scale)
+    char_w = int(char_h * character.width / character.height)
+    resized = character.resize((char_w, char_h), Image.LANCZOS)
+
+    canvas = Image.new("RGB", (out_w, out_h), (0, 0, 0))
+    rx, ry = rel_pos
+    paste_x = int(out_w * rx - char_w / 2)
+    paste_y = int(out_h * ry - char_h / 2)
+    canvas.paste(resized, (paste_x, paste_y))
+    return canvas
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +163,6 @@ def create_dots_wallpaper(
     bg_color: tuple[int, int, int] = (0, 0, 0),
     dot_color: tuple[int, int, int] | None = None,
     colored: bool = False,
-    rel_pos: tuple[float, float] | None = None,
 ) -> Image.Image:
     """Render *source* as a dot-style wallpaper of size ``out_w`` x ``out_h``."""
     src_ratio = source.width / source.height
@@ -154,18 +182,12 @@ def create_dots_wallpaper(
     output = Image.new("RGB", (out_w, out_h), bg_color)
     draw = ImageDraw.Draw(output)
 
-    gray_pixels = list(gray.getdata())
+    gray_pixels = list(gray.get_flattened_data())
 
     art_w = cols_count * dot_spacing
     art_h = rows_count * dot_spacing
-
-    if rel_pos:
-        rx, ry = rel_pos
-        offset_x = int(out_w * rx - art_w / 2)
-        offset_y = int(out_h * ry - art_h / 2)
-    else:
-        offset_x = (out_w - art_w) // 2
-        offset_y = (out_h - art_h) // 2
+    offset_x = (out_w - art_w) // 2
+    offset_y = (out_h - art_h) // 2
 
     for i, p in enumerate(gray_pixels):
         if p < threshold:
@@ -262,10 +284,11 @@ def _resolve_output_path(input_path: Path, output: str | None) -> str:
 
 def _prepare_mode(
     img: Image.Image, args: argparse.Namespace
-) -> tuple[Image.Image, tuple[int, int], tuple[int, int, int], tuple[int, int, int] | None, bool, tuple[float, float] | None]:
+) -> tuple[Image.Image, tuple[int, int], tuple[int, int, int], tuple[int, int, int] | None, bool]:
     """Apply mode-specific preprocessing.
 
-    Returns ``(processed_img, (out_w, out_h), bg_color, dot_color, colored, rel_pos)``.
+    Returns ``(processed_img, (out_w, out_h), bg_color, dot_color, colored)``.
+    For color/white modes the image is already composed at the correct proportions.
     """
     out_w, out_h = resolve_output_size(
         img.width, img.height, args.width, args.height
@@ -276,18 +299,12 @@ def _prepare_mode(
     if args.mode == "full":
         if not args.bg:
             bg_color = detect_bg_color(np.array(img))
-        return img, (out_w, out_h), bg_color, dot_color, True, None
+        return img, (out_w, out_h), bg_color, dot_color, True
 
-    img, rel_pos = crop_to_character(img)
-    print(f"Cropped to character: {img.width}x{img.height}")
-    return (
-        img,
-        (out_w, out_h),
-        bg_color,
-        dot_color,
-        args.mode == "color",
-        rel_pos,
-    )
+    char_img, rel_pos, scale = crop_to_character(img)
+    print(f"Cropped to character: {char_img.width}x{char_img.height} (scale: {scale:.2f})")
+    img = _compose_character(char_img, out_w, out_h, rel_pos, scale)
+    return img, (out_w, out_h), bg_color, dot_color, args.mode == "color"
 
 
 def main() -> None:
@@ -301,7 +318,7 @@ def main() -> None:
     img = Image.open(input_path).convert("RGB")
     print(f"Loaded: {input_path} ({img.width}x{img.height})")
 
-    img, (out_w, out_h), bg_color, dot_color, colored, rel_pos = _prepare_mode(
+    img, (out_w, out_h), bg_color, dot_color, colored = _prepare_mode(
         img, args
     )
 
@@ -315,7 +332,6 @@ def main() -> None:
         bg_color=bg_color,
         dot_color=dot_color,
         colored=colored,
-        rel_pos=rel_pos,
     )
 
     out_path = _resolve_output_path(input_path, args.output)
