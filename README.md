@@ -8,6 +8,12 @@ Convert any image into a dot-style wallpaper.
 ## Install
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/SamuzDev/pixa/main/install.sh | bash
+```
+
+Or with pip:
+
+```bash
 pip install .
 ```
 
