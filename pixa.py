@@ -107,25 +107,16 @@ def crop_to_character(img: Image.Image) -> tuple[Image.Image, tuple[float, float
 def resolve_output_size(
     img_w: int,
     img_h: int,
-    mode: str,
     explicit_w: int | None,
     explicit_h: int | None,
 ) -> tuple[int, int]:
     """Decide final output dimensions.
 
-    * full: keep original size (unless user specifies explicitly).
-    * color / white: default to 1920x1080 when input is larger.
+    Always keeps the original size unless the user specifies explicitly.
     """
     if explicit_w is not None or explicit_h is not None:
         return explicit_w or img_w, explicit_h or img_h
-
-    if mode == "full":
-        return img_w, img_h
-
-    if img_w <= DEFAULT_WIDTH and img_h <= DEFAULT_HEIGHT:
-        return img_w, img_h
-
-    return DEFAULT_WIDTH, DEFAULT_HEIGHT
+    return img_w, img_h
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +268,7 @@ def _prepare_mode(
     Returns ``(processed_img, (out_w, out_h), bg_color, dot_color, colored, rel_pos)``.
     """
     out_w, out_h = resolve_output_size(
-        img.width, img.height, args.mode, args.width, args.height
+        img.width, img.height, args.width, args.height
     )
     bg_color = hex_to_rgb(args.bg) if args.bg else (0, 0, 0)
     dot_color = hex_to_rgb(args.text_color)
