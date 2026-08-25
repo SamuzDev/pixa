@@ -273,13 +273,11 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _resolve_output_path(input_path: Path, output: str | None) -> str:
+def _resolve_output_path(input_path: Path, output: str | None, mode: str) -> str:
     """Deduce output path, preserving the input file extension."""
     if output:
         return output
-    return str(input_path.with_name(f"output{input_path.suffix}"))
-    """Open *path* and ensure RGB mode."""
-    return Image.open(path).convert("RGB")
+    return str(input_path.with_name(f"output_{mode}{input_path.suffix}"))
 
 
 def _prepare_mode(
@@ -334,7 +332,7 @@ def main() -> None:
         colored=colored,
     )
 
-    out_path = _resolve_output_path(input_path, args.output)
+    out_path = _resolve_output_path(input_path, args.output, args.mode)
     result.save(out_path)
     print(f"Saved: {out_path} ({out_w}x{out_h})")
 
