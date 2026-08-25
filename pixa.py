@@ -32,11 +32,16 @@ def remove_background(arr: np.ndarray, threshold: int = 30) -> np.ndarray:
     most_common = Counter(edge_tuples).most_common(1)[0][0]
 
     r, g, b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
-    bg_mask = (
-        (np.abs(r.astype(int) - most_common[0]) < threshold) &
-        (np.abs(g.astype(int) - most_common[1]) < threshold) &
-        (np.abs(b.astype(int) - most_common[2]) < threshold)
+
+    # Calculate color distance from background
+    dist = np.sqrt(
+        (r.astype(float) - most_common[0])**2 +
+        (g.astype(float) - most_common[1])**2 +
+        (b.astype(float) - most_common[2])**2
     )
+
+    # Background pixels are close to the detected color
+    bg_mask = dist < threshold * 3
 
     return bg_mask
 
