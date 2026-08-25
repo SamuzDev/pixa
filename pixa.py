@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """pixa - Convert images to dot-style wallpapers."""
 
+from __future__ import annotations
+
 import argparse
 import sys
 from collections import Counter
@@ -9,17 +11,28 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
+__version__ = "0.0.1"
+
 DEFAULT_WIDTH = 1920
 DEFAULT_HEIGHT = 1080
 
 
+# ---------------------------------------------------------------------------
+# Color helpers
+# ---------------------------------------------------------------------------
+
 def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    """Convert ``#RRGGBB`` to ``(r, g, b)``."""
     h = hex_color.lstrip("#")
     return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
 
 
+# ---------------------------------------------------------------------------
+# Background detection & removal
+# ---------------------------------------------------------------------------
+
 def detect_bg_color(arr: np.ndarray) -> tuple[int, int, int]:
-    """Find the most common edge color (background)."""
+    """Sample image edges and return the most common colour (the background)."""
     edges = np.concatenate([
         arr[0, :],
         arr[-1, :],
@@ -31,64 +44,78 @@ def detect_bg_color(arr: np.ndarray) -> tuple[int, int, int]:
 
 
 def remove_background(arr: np.ndarray, threshold: int = 30) -> np.ndarray:
-    """Detect and remove solid-color backgrounds by finding the most common edge color."""
-    most_common = detect_bg_color(arr)
+    """Return a boolean mask where ``True`` = background pixel.
 
-    r, g, b = arr[:,:,0], arr[:,:,1], arr[:,:,2]
+    Uses euclidean distance from the most common edge colour.
+    """
+    bg = detect_bg_color(arr)
+
+    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
 
     dist = np.sqrt(
-        (r.astype(float) - most_common[0])**2 +
-        (g.astype(float) - most_common[1])**2 +
-        (b.astype(float) - most_common[2])**2
+        (r.astype(float) - bg[0]) ** 2
+        + (g.astype(float) - bg[1]) ** 2
+        + (b.astype(float) - bg[2]) ** 2
     )
-
-    bg_mask = dist < threshold * 3
-    return bg_mask
+    return dist < threshold * 3
 
 
-def find_character_bbox(mask: np.ndarray, pad: int = 30) -> tuple[int, int, int, int]:
-    """Find bounding box of non-background pixels."""
+def find_character_bbox(
+    mask: np.ndarray, pad: int = 30
+) -> tuple[int, int, int, int]:
+    """Return ``(x_min, y_min, x_max, y_max)`` bounding box of non-bg pixels."""
     rows = np.any(~mask, axis=1)
     cols = np.any(~mask, axis=0)
     rmin, rmax = np.where(rows)[0][[0, -1]]
     cmin, cmax = np.where(cols)[0][[0, -1]]
 
     h, w = mask.shape
-    rmin = max(0, rmin - pad)
-    rmax = min(h, rmax + pad)
-    cmin = max(0, cmin - pad)
-    cmax = min(w, cmax + pad)
-
-    return cmin, rmin, cmax, rmax
+    return (
+        max(0, cmin - pad),
+        max(0, rmin - pad),
+        min(w, cmax + pad),
+        min(h, rmax + pad),
+    )
 
 
 def crop_to_character(img: Image.Image) -> tuple[Image.Image, tuple[float, float]]:
-    """Remove background, crop to character, set bg pixels to black.
+    """Remove background and crop to the character bounding box.
 
-    Returns (cropped_image, (rel_x, rel_y)) where the relative position
-    indicates where the character's centre sits in the *original* image.
+    Returns ``(cropped_image, (rel_x, rel_y))`` where the relative position
+    is where the character's centre sits in the *original* image (0-1 range).
     """
     orig_w, orig_h = img.size
     arr = np.array(img)
     bg_mask = remove_background(arr)
     bbox = find_character_bbox(bg_mask)
-    img = img.crop(bbox)
 
-    crop_arr = np.array(img)
-    local_mask = bg_mask[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+    cropped = img.crop(bbox)
+    crop_arr = np.array(cropped)
+    local_mask = bg_mask[bbox[1] : bbox[3], bbox[0] : bbox[2]]
     crop_arr[local_mask] = [0, 0, 0]
-    img = Image.fromarray(crop_arr)
 
-    cx = (bbox[0] + bbox[2]) / 2 / orig_w
-    cy = (bbox[1] + bbox[3]) / 2 / orig_h
+    rel_x = (bbox[0] + bbox[2]) / 2 / orig_w
+    rel_y = (bbox[1] + bbox[3]) / 2 / orig_h
 
-    return img, (cx, cy)
+    return Image.fromarray(crop_arr), (rel_x, rel_y)
 
+
+# ---------------------------------------------------------------------------
+# Output sizing
+# ---------------------------------------------------------------------------
 
 def resolve_output_size(
-    img_w: int, img_h: int, mode: str, explicit_w: int | None, explicit_h: int | None
+    img_w: int,
+    img_h: int,
+    mode: str,
+    explicit_w: int | None,
+    explicit_h: int | None,
 ) -> tuple[int, int]:
-    """Decide final output dimensions."""
+    """Decide final output dimensions.
+
+    * full: keep original size (unless user specifies explicitly).
+    * color / white: default to 1920x1080 when input is larger.
+    """
     if explicit_w is not None or explicit_h is not None:
         return explicit_w or img_w, explicit_h or img_h
 
@@ -101,10 +128,15 @@ def resolve_output_size(
     return DEFAULT_WIDTH, DEFAULT_HEIGHT
 
 
+# ---------------------------------------------------------------------------
+# Core rendering
+# ---------------------------------------------------------------------------
+
 def create_dots_wallpaper(
     source: Image.Image,
     out_w: int,
     out_h: int,
+    *,
     dot_spacing: int = 7,
     max_radius: float = 3.2,
     threshold: int = 25,
@@ -113,7 +145,7 @@ def create_dots_wallpaper(
     colored: bool = False,
     rel_pos: tuple[float, float] | None = None,
 ) -> Image.Image:
-    """Create a dot-style wallpaper from an image."""
+    """Render *source* as a dot-style wallpaper of size ``out_w`` x ``out_h``."""
     src_ratio = source.width / source.height
     out_ratio = out_w / out_h
 
@@ -173,27 +205,94 @@ def create_dots_wallpaper(
     return output
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="pixa",
         description="Convert images to dot-style wallpapers",
     )
     p.add_argument("input", help="Input image path")
-    p.add_argument("-o", "--output", default="output.png", help="Output path (default: output.png)")
-    p.add_argument("-w", "--width", type=int, default=None, help="Output width (default: auto)")
-    p.add_argument("-ht", "--height", type=int, default=None, help="Output height (default: auto)")
-    p.add_argument("-d", "--dot-size", type=int, default=7, help="Dot spacing in px (default: 7)")
-    p.add_argument("-r", "--radius", type=float, default=3.2, help="Max dot radius (default: 3.2)")
-    p.add_argument("-th", "--threshold", type=int, default=25, help="Min brightness threshold (default: 25)")
-    p.add_argument("--bg", default=None, help="Background hex color (default: auto)")
-    p.add_argument("--text-color", default="#ffffff", help="Dot color in white mode (default: #ffffff)")
+    p.add_argument(
+        "-o", "--output", default="output.png",
+        help="Output path (default: output.png)",
+    )
+    p.add_argument(
+        "-w", "--width", type=int, default=None,
+        help="Output width (default: auto)",
+    )
+    p.add_argument(
+        "-ht", "--height", type=int, default=None,
+        help="Output height (default: auto)",
+    )
+    p.add_argument(
+        "-d", "--dot-size", type=int, default=7,
+        help="Dot spacing in px (default: 7)",
+    )
+    p.add_argument(
+        "-r", "--radius", type=float, default=3.2,
+        help="Max dot radius (default: 3.2)",
+    )
+    p.add_argument(
+        "-th", "--threshold", type=int, default=25,
+        help="Min brightness threshold (default: 25)",
+    )
+    p.add_argument(
+        "--bg", default=None,
+        help="Background hex color (default: auto)",
+    )
+    p.add_argument(
+        "--text-color", default="#ffffff",
+        help="Dot color in white mode (default: #ffffff)",
+    )
     p.add_argument(
         "--mode",
         choices=["full", "color", "white"],
         default="white",
-        help="full = whole image + original bg | color = character + colored dots | white = character + white dots",
+        help=(
+            "full   = whole image + original bg | "
+            "color  = character + colored dots | "
+            "white  = character + white dots"
+        ),
     )
     return p
+
+
+def _load_image(path: Path) -> Image.Image:
+    """Open *path* and ensure RGB mode."""
+    return Image.open(path).convert("RGB")
+
+
+def _prepare_mode(
+    img: Image.Image, args: argparse.Namespace
+) -> tuple[Image.Image, tuple[int, int], tuple[int, int, int], tuple[int, int, int] | None, bool, tuple[float, float] | None]:
+    """Apply mode-specific preprocessing.
+
+    Returns ``(processed_img, (out_w, out_h), bg_color, dot_color, colored, rel_pos)``.
+    """
+    out_w, out_h = resolve_output_size(
+        img.width, img.height, args.mode, args.width, args.height
+    )
+    bg_color = hex_to_rgb(args.bg) if args.bg else (0, 0, 0)
+    dot_color = hex_to_rgb(args.text_color)
+
+    if args.mode == "full":
+        if not args.bg:
+            bg_color = detect_bg_color(np.array(img))
+        return img, (out_w, out_h), bg_color, dot_color, True, None
+
+    img, rel_pos = crop_to_character(img)
+    print(f"Cropped to character: {img.width}x{img.height}")
+    return (
+        img,
+        (out_w, out_h),
+        bg_color,
+        dot_color,
+        args.mode == "color",
+        rel_pos,
+    )
 
 
 def main() -> None:
@@ -204,45 +303,25 @@ def main() -> None:
         print(f"Error: {input_path} not found", file=sys.stderr)
         sys.exit(1)
 
-    img = Image.open(input_path)
+    img = _load_image(input_path)
     print(f"Loaded: {input_path} ({img.width}x{img.height})")
 
-    out_w, out_h = resolve_output_size(
-        img.width, img.height, args.mode, args.width, args.height
+    img, (out_w, out_h), bg_color, dot_color, colored, rel_pos = _prepare_mode(
+        img, args
     )
-    bg_color = hex_to_rgb(args.bg) if args.bg else (0, 0, 0)
-    dot_color = hex_to_rgb(args.text_color)
 
-    if args.mode == "full":
-        arr = np.array(img)
-        if not args.bg:
-            bg_color = detect_bg_color(arr)
-        result = create_dots_wallpaper(
-            source=img,
-            out_w=out_w,
-            out_h=out_h,
-            dot_spacing=args.dot_size,
-            max_radius=args.radius,
-            threshold=args.threshold,
-            bg_color=bg_color,
-            dot_color=dot_color,
-            colored=True,
-        )
-    else:
-        img, rel_pos = crop_to_character(img)
-        print(f"Cropped to character: {img.width}x{img.height}")
-        result = create_dots_wallpaper(
-            source=img,
-            out_w=out_w,
-            out_h=out_h,
-            dot_spacing=args.dot_size,
-            max_radius=args.radius,
-            threshold=args.threshold,
-            bg_color=bg_color,
-            dot_color=dot_color,
-            colored=(args.mode == "color"),
-            rel_pos=rel_pos,
-        )
+    result = create_dots_wallpaper(
+        source=img,
+        out_w=out_w,
+        out_h=out_h,
+        dot_spacing=args.dot_size,
+        max_radius=args.radius,
+        threshold=args.threshold,
+        bg_color=bg_color,
+        dot_color=dot_color,
+        colored=colored,
+        rel_pos=rel_pos,
+    )
 
     result.save(args.output)
     print(f"Saved: {args.output} ({out_w}x{out_h})")
